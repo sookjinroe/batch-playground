@@ -328,18 +328,33 @@ async function processBatchResults(jsonlText) {
     try {
         const results = jsonlText.trim().split('\n').map(line => JSON.parse(line));
         
+        // API 응답 구조 확인을 위한 로그
+        console.log('API Response:', results);
+        
         // API 응답 구조 변경에 대응
-        results.forEach(result => {
+        results.forEach((result, index) => {
+            // 응답 구조 확인
             const messageContent = result.choices?.[0]?.message?.content 
-                || result.message?.content  // 새로운 API 응답 형식
+                || result.message?.content 
+                || result.content  // 다른 가능한 응답 구조
                 || '';
-            outputMap.set(result.id, messageContent);
+                
+            // request-${index + 1} 대신 실제 id 사용
+            const requestId = `request-${index + 1}`;
+            console.log(`Mapping ${requestId} to content:`, messageContent);
+            outputMap.set(requestId, messageContent);
         });
+
+        // 매핑 결과 확인
+        console.log('Output Map:', Object.fromEntries(outputMap));
+        console.log('Input Contents:', inputContents);
 
         const csvContent = [
             'id,user,assistant',
             ...inputContents.map((input, index) => {
-                const output = outputMap.get(`request-${index + 1}`) || '';
+                const requestId = `request-${index + 1}`;
+                const output = outputMap.get(requestId) || '';
+                console.log(`Row ${index}: id=${input.id}, output=${output}`);
                 return `"${escapeCsvField(input.id)}","${escapeCsvField(input.user)}","${escapeCsvField(output)}"`;
             })
         ].join('\n');
@@ -357,7 +372,7 @@ async function processBatchResults(jsonlText) {
         downloadBtn.disabled = false;
     } catch (error) {
         alert('결과 처리 실패: ' + error.message);
-        console.error('Full error:', error);  // 디버깅용 로그 추가
+        console.error('Full error:', error);
     }
 }
 
