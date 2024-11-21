@@ -162,18 +162,18 @@ async function handleInputCSV(event) {
     const file = event.target.files[0];
     if (!file) return;
 
-    // 파일명에서 확장자 제거하고 저장 (추가)
     originalFileName = file.name.replace(/\.[^/.]+$/, '');
 
     try {
         if (file.name.match(/\.(xlsx|xls)$/i)) {
             const data = await readExcelFile(file);
-            inputContents = data.filter(line => line && line.toString().trim());
+            inputContents = data;  // 여기서 filter가 필요 없습니다
         } else {
             const text = await readFileAsText(file);
             inputContents = text;
         }
         
+        console.log('Loaded contents:', inputContents); // 디버깅용
         downloadBtn.disabled = false;
     } catch (error) {
         alert('파일 읽기 실패: ' + error.message);
@@ -208,6 +208,8 @@ async function startBatchProcess() {
 
 // JSONL 파일 내용 생성
 function createBatchJSONL() {
+    console.log('Creating JSONL from:', inputContents); // 디버깅용
+    
     const requests = inputContents.map((content, index) => ({
         custom_id: `request-${index + 1}`,
         method: "POST",
@@ -223,13 +225,13 @@ function createBatchJSONL() {
                 },
                 {
                     role: "user",
-                    content: content.user  // content.user로 수정
+                    content: content.user || ''  // null/undefined 체크 추가
                 }
             ]
         }
     }));
-    
-    return requests.map(req => JSON.stringify(req)).join('\n');
+
+    return requests.map(request => JSON.stringify(request)).join('\n');
 }
 
 // 파일 업로드
