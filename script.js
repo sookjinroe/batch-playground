@@ -144,9 +144,10 @@ function setupEventListeners() {
 
 // 전역 변수로 입력 데이터 저장
 let inputContents = [];
+let outputMap = new Map();  // 추가
+let originalFileName = '';
 let batchId = null;
 let pollingInterval = null;
-let originalFileName = ''; // 추가
 
 // DOM 요소 참조
 const inputCsvFile = document.getElementById('input-csv');
@@ -326,7 +327,7 @@ function processBatchResults(jsonlText) {
             .filter(line => line)
             .map(line => JSON.parse(line));
         
-        const outputMap = new Map();
+        outputMap = new Map();  // 새로운 Map 생성
         results.forEach(result => {
             if (result.response?.body?.choices?.[0]) {
                 const content = result.response.body.choices[0].message.content;
