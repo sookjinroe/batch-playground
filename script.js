@@ -354,16 +354,13 @@ function downloadCsv(content) {
     const timestamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
     const filename = `${originalFileName}_results_${timestamp}`;
 
-    const rows = content.split('\n').map(row => {
-        const [id, user, assistant] = row.split(',').map(field => 
-            field.replace(/^"(.*)"$/, '$1').replace(/""/g, '"')
-        );
-        return [id, user, assistant];
-    });
-
-    rows.shift(); // 헤더 행 제거
-
     if (outputFormat === 'xlsx') {
+        // CSV 파싱하지 않고 직접 inputContents와 outputMap 사용
+        const rows = inputContents.map((input, index) => {
+            const output = outputMap.get(`request-${index + 1}`) || '';
+            return [input.id, input.user, output];
+        });
+
         const ws = XLSX.utils.aoa_to_sheet([['id', 'user', 'assistant'], ...rows]);
         const wb = XLSX.utils.book_new();
         XLSX.utils.book_append_sheet(wb, ws, 'Results');
