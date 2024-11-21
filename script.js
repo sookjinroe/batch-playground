@@ -327,8 +327,13 @@ async function downloadResults(fileId) {
 async function processBatchResults(jsonlText) {
     try {
         const results = jsonlText.trim().split('\n').map(line => JSON.parse(line));
+        
+        // API 응답 구조 변경에 대응
         results.forEach(result => {
-            outputMap.set(result.id, result.choices[0]?.message?.content || '');
+            const messageContent = result.choices?.[0]?.message?.content 
+                || result.message?.content  // 새로운 API 응답 형식
+                || '';
+            outputMap.set(result.id, messageContent);
         });
 
         const csvContent = [
@@ -352,6 +357,7 @@ async function processBatchResults(jsonlText) {
         downloadBtn.disabled = false;
     } catch (error) {
         alert('결과 처리 실패: ' + error.message);
+        console.error('Full error:', error);  // 디버깅용 로그 추가
     }
 }
 
