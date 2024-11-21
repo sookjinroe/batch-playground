@@ -1,0 +1,90 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <title>OpenAI Batch Processor</title>
+    <link rel="stylesheet" href="styles.css">
+    <script src="https://cdn.sheetjs.com/xlsx-latest/package/dist/xlsx.full.min.js"></script>
+</head>
+<body>
+    <div class="container">
+        <section class="input-section">
+            <h2>Batch Input Settings</h2>
+            
+            <div class="form-group">
+                <label for="api-key">OpenAI API Key:</label>
+                <input type="password" id="api-key" placeholder="sk-...">
+            </div>
+
+            <div class="form-group">
+                <label for="model">Model:</label>
+                <input type="text" id="model" placeholder="예: gpt-3.5-turbo-0125">
+            </div>
+
+            <div class="form-group">
+                <label for="temperature">Temperature:</label>
+                <input type="number" id="temperature" step="0.1" min="0" max="2" value="0.7">
+            </div>
+
+            <div class="form-group">
+                <label for="max-tokens">Max Tokens:</label>
+                <input type="number" id="max-tokens" value="1000">
+            </div>
+
+            <div class="form-group">
+                <label for="system-message">System Message:</label>
+                <div class="template-controls">
+                    <select id="template-select">
+                        <option value="">템플릿 선택...</option>
+                    </select>
+                    <button id="save-template" class="secondary-btn">현재 메시지 저장</button>
+                    <button id="delete-template" class="secondary-btn">템플릿 삭제</button>
+                </div>
+                <textarea id="system-message" rows="4" placeholder="시스템 메시지를 입력하세요"></textarea>
+            </div>
+
+            <div class="form-group">
+                <label for="input-csv">Input File:</label>
+                <input type="file" id="input-csv" accept=".csv,.xlsx,.xls">
+                <small>각 라인이 하나의 유저 메시지가 됩니다</small>
+            </div>
+
+            <div class="form-group">
+                <label for="output-format">Output Format:</label>
+                <select id="output-format">
+                    <option value="csv">CSV</option>
+                    <option value="xlsx">Excel</option>
+                </select>
+            </div>
+
+            <button id="download-btn" disabled>Process Batch</button>
+        </section>
+
+        <section class="status-section" id="status-section" style="display: none;">
+            <h3>Processing Status</h3>
+            <div id="status-message"></div>
+        </section>
+    </div>
+
+    <!-- 템플릿 저장 모달 -->
+    <div id="template-modal" class="modal">
+        <div class="modal-content">
+            <h3>시스템 메시지 템플릿 저장</h3>
+            <div class="form-group">
+                <label for="template-name">템플릿 이름:</label>
+                <input type="text" id="template-name" placeholder="템플릿 이름을 입력하세요">
+            </div>
+            <div class="form-group">
+                <label>메시지 내용:</label>
+                <div id="template-content-preview"></div>
+            </div>
+            <div class="modal-buttons">
+                <button id="save-template-confirm" class="primary-btn">저장</button>
+                <button id="cancel-template-save" class="secondary-btn">취소</button>
+            </div>
+        </div>
+    </div>
+
+    <script src="script.js"></script>
+</body>
+</html>
