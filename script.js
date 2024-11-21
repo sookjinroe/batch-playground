@@ -326,28 +326,16 @@ async function downloadResults(fileId) {
 // 배치 결과 처리 및 CSV 다운로드
 async function processBatchResults(jsonlText) {
     try {
+        console.log('Raw JSONL response:', jsonlText);
         const results = jsonlText.trim().split('\n').map(line => JSON.parse(line));
+        console.log('Parsed results:', results);
         
-        // API 응답 구조 확인을 위한 로그
-        console.log('API Response:', results);
-        
-        // API 응답 구조 변경에 대응
-        results.forEach((result, index) => {
-            // 응답 구조 확인
-            const messageContent = result.choices?.[0]?.message?.content 
-                || result.message?.content 
-                || result.content  // 다른 가능한 응답 구조
-                || '';
-                
-            // request-${index + 1} 대신 실제 id 사용
-            const requestId = `request-${index + 1}`;
-            console.log(`Mapping ${requestId} to content:`, messageContent);
-            outputMap.set(requestId, messageContent);
+        results.forEach(result => {
+            // API 응답 구조에 맞게 수정
+            const messageContent = result.response?.body?.choices?.[0]?.message?.content || '';
+            outputMap.set(result.custom_id, messageContent);
+            console.log(`Mapping ${result.custom_id} to:`, messageContent);
         });
-
-        // 매핑 결과 확인
-        console.log('Output Map:', Object.fromEntries(outputMap));
-        console.log('Input Contents:', inputContents);
 
         const csvContent = [
             'id,user,assistant',
