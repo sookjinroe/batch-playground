@@ -146,6 +146,7 @@ function setupEventListeners() {
 let inputContents = [];
 let batchId = null;
 let pollingInterval = null;
+let originalFileName = ''; // 추가
 
 // DOM 요소 참조
 const inputCsvFile = document.getElementById('input-csv');
@@ -161,17 +162,16 @@ async function handleInputCSV(event) {
     const file = event.target.files[0];
     if (!file) return;
 
+    // 파일명에서 확장자 제거하고 저장 (추가)
+    originalFileName = file.name.replace(/\.[^/.]+$/, '');
+
     try {
         if (file.name.match(/\.(xlsx|xls)$/i)) {
-            // 엑셀 파일 처리
             const data = await readExcelFile(file);
             inputContents = data.filter(line => line && line.toString().trim());
         } else {
-            // CSV 파일 처리
             const text = await readFileAsText(file);
-            inputContents = text.split('\n')
-                .map(line => line.trim())
-                .filter(line => line);
+            inputContents = text;
         }
         
         downloadBtn.disabled = false;
@@ -223,7 +223,7 @@ function createBatchJSONL() {
                 },
                 {
                     role: "user",
-                    content: content
+                    content: content.user  // content.user로 수정
                 }
             ]
         }
@@ -326,19 +326,17 @@ function processBatchResults(jsonlText) {
         
         const outputMap = new Map();
         results.forEach(result => {
-            if (result.response && result.response.body && 
-                result.response.body.choices && 
-                result.response.body.choices[0]) {
+            if (result.response?.body?.choices?.[0]) {
                 const content = result.response.body.choices[0].message.content;
                 outputMap.set(result.custom_id, content);
             }
         });
 
         const csvContent = [
-            'Input,Output',
+            'id,user,assistant',
             ...inputContents.map((input, index) => {
                 const output = outputMap.get(`request-${index + 1}`) || '';
-                return `"${escapeCsvField(input)}","${escapeCsvField(output)}"`;
+                return `"${escapeCsvField(input.id)}","${escapeCsvField(input.user)}","${escapeCsvField(output)}"`;
             })
         ].join('\n');
 
@@ -346,6 +344,38 @@ function processBatchResults(jsonlText) {
         downloadBtn.disabled = false;
     } catch (error) {
         alert('결과 처리 실패: ' + error.message);
+    }
+}
+
+function downloadCsv(content) {
+    const outputFormat = document.getElementById('output-format').value;
+    const timestamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
+    const filename = `${originalFileName}_results_${timestamp}`;
+
+    const rows = content.split('\n').map(row => {
+        const [id, user, assistant] = row.split(',').map(field => 
+            field.replace(/^"(.*)"$/, '$1').replace(/""/g, '"')
+        );
+        return [id, user, assistant];
+    });
+
+    rows.shift(); // 헤더 행 제거
+
+    if (outputFormat === 'xlsx') {
+        const ws = XLSX.utils.aoa_to_sheet([['id', 'user', 'assistant'], ...rows]);
+        const wb = XLSX.utils.book_new();
+        XLSX.utils.book_append_sheet(wb, ws, 'Results');
+        XLSX.writeFile(wb, `${filename}.xlsx`);
+    } else {
+        const blob = new Blob(['\uFEFF' + content], { type: 'text/csv;charset=utf-8' });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = `${filename}.csv`;
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        URL.revokeObjectURL(url);
     }
 }
 
@@ -365,7 +395,36 @@ function stopPolling() {
 function readFileAsText(file) {
     return new Promise((resolve, reject) => {
         const reader = new FileReader();
-        reader.onload = () => resolve(reader.result);
+        reader.onload = () => {
+            try {
+                const lines = reader.result.split('\n').map(line => line.trim());
+                if (lines.length < 2) throw new Error('파일이 비어있습니다.');
+                
+                // 헤더 확인
+                const headers = lines[0].split(',').map(h => h.trim().toLowerCase());
+                const idIndex = headers.indexOf('id');
+                const userIndex = headers.indexOf('user');
+                
+                if (idIndex === -1 || userIndex === -1) {
+                    throw new Error('파일은 반드시 "id"와 "user" 열을 포함해야 합니다.');
+                }
+                
+                // 데이터 파싱
+                const data = lines.slice(1)
+                    .filter(line => line)
+                    .map(line => {
+                        const values = line.split(',').map(v => v.trim());
+                        return {
+                            id: values[idIndex] || '',
+                            user: values[userIndex] || ''
+                        };
+                    });
+                
+                resolve(data);
+            } catch (error) {
+                reject(error);
+            }
+        };
         reader.onerror = () => reject(reader.error);
         reader.readAsText(file, 'UTF-8');
     });
@@ -379,9 +438,18 @@ function readExcelFile(file) {
                 const data = new Uint8Array(e.target.result);
                 const workbook = XLSX.read(data, { type: 'array' });
                 const firstSheet = workbook.Sheets[workbook.SheetNames[0]];
-                const jsonData = XLSX.utils.sheet_to_json(firstSheet, { header: 1 });
-                // 첫 번째 열만 추출
-                resolve(jsonData.map(row => row[0]?.toString() || ''));
+                const jsonData = XLSX.utils.sheet_to_json(firstSheet);
+                
+                // 헤더 확인
+                if (!jsonData.length || !jsonData[0].hasOwnProperty('id') || !jsonData[0].hasOwnProperty('user')) {
+                    throw new Error('파일은 반드시 "id"와 "user" 열을 포함해야 합니다.');
+                }
+                
+                // id와 user 컬럼만 추출
+                resolve(jsonData.map(row => ({
+                    id: row.id?.toString() || '',
+                    user: row.user?.toString() || ''
+                })));
             } catch (error) {
                 reject(error);
             }
@@ -389,38 +457,6 @@ function readExcelFile(file) {
         reader.onerror = () => reject(reader.error);
         reader.readAsArrayBuffer(file);
     });
-}
-
-function downloadCsv(content) {
-    const outputFormat = document.getElementById('output-format').value;
-    const rows = content.split('\n').map(row => {
-        const [input, output] = row.split(',').map(field => 
-            field.replace(/^"(.*)"$/, '$1').replace(/""/g, '"')
-        );
-        return [input, output];
-    });
-
-    // 헤더 행 제거
-    rows.shift();
-
-    if (outputFormat === 'xlsx') {
-        // 엑셀 파일로 다운로드
-        const ws = XLSX.utils.aoa_to_sheet([['Input', 'Output'], ...rows]);
-        const wb = XLSX.utils.book_new();
-        XLSX.utils.book_append_sheet(wb, ws, 'Results');
-        XLSX.writeFile(wb, 'batch_results.xlsx');
-    } else {
-        // CSV 파일로 다운로드 (기존 코드)
-        const blob = new Blob(['\uFEFF' + content], { type: 'text/csv;charset=utf-8' });
-        const url = URL.createObjectURL(blob);
-        const a = document.createElement('a');
-        a.href = url;
-        a.download = 'batch_results.csv';
-        document.body.appendChild(a);
-        a.click();
-        document.body.removeChild(a);
-        URL.revokeObjectURL(url);
-    }
 }
 
 function escapeCsvField(field) {
