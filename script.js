@@ -23,7 +23,6 @@ const elements = {
     templatePreview: document.getElementById('template-content-preview'),
     saveTemplateConfirm: document.getElementById('save-template-confirm'),
     cancelTemplateSave: document.getElementById('cancel-template-save'),
-    outputFormat: document.getElementById('output-format'),
 };
 
 // 설정 저장 함수
@@ -164,20 +163,24 @@ async function handleInputCSV(event) {
     if (!file) return;
 
     originalFileName = file.name.replace(/\.[^/.]+$/, '');
+    downloadBtn.disabled = true;
 
     try {
-        if (file.name.match(/\.(xlsx|xls)$/i)) {
-            const data = await readExcelFile(file);
-            inputContents = data;  // 여기서 filter가 필요 없습니다
-        } else {
-            const text = await readFileAsText(file);
-            inputContents = text;
+        // Excel과 CSV 모두 동일한 형태의 데이터로 변환
+        inputContents = file.name.match(/\.(xlsx|xls)$/i) 
+            ? await readExcelFile(file)
+            : await readFileAsText(file);
+
+        // 데이터 검증
+        if (!inputContents || !inputContents.length) {
+            throw new Error('파일이 비어있습니다.');
         }
-        
-        console.log('Loaded contents:', inputContents); // 디버깅용
+
         downloadBtn.disabled = false;
     } catch (error) {
         alert('파일 읽기 실패: ' + error.message);
+        downloadBtn.disabled = true;
+        inputContents = [];
     }
 }
 
@@ -321,18 +324,11 @@ async function downloadResults(fileId) {
 }
 
 // 배치 결과 처리 및 CSV 다운로드
-function processBatchResults(jsonlText) {
+async function processBatchResults(jsonlText) {
     try {
-        const results = jsonlText.split('\n')
-            .filter(line => line)
-            .map(line => JSON.parse(line));
-        
-        outputMap = new Map();  // 새로운 Map 생성
+        const results = jsonlText.trim().split('\n').map(line => JSON.parse(line));
         results.forEach(result => {
-            if (result.response?.body?.choices?.[0]) {
-                const content = result.response.body.choices[0].message.content;
-                outputMap.set(result.custom_id, content);
-            }
+            outputMap.set(result.id, result.choices[0]?.message?.content || '');
         });
 
         const csvContent = [
@@ -343,40 +339,45 @@ function processBatchResults(jsonlText) {
             })
         ].join('\n');
 
-        downloadCsv(csvContent);
+        if (originalFileName.match(/\.(xlsx|xls)$/i)) {
+            downloadExcel(inputContents.map((input, index) => ({
+                id: input.id,
+                user: input.user,
+                assistant: outputMap.get(`request-${index + 1}`) || ''
+            })));
+        } else {
+            downloadCsv(csvContent);
+        }
+        
         downloadBtn.disabled = false;
     } catch (error) {
         alert('결과 처리 실패: ' + error.message);
     }
 }
 
-function downloadCsv(content) {
-    const outputFormat = document.getElementById('output-format').value;
+function downloadExcel(data) {
     const timestamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
-    const filename = `${originalFileName}_results_${timestamp}`;
+    const filename = `${originalFileName}_results_${timestamp}.xlsx`;
+    
+    const ws = XLSX.utils.json_to_sheet(data);
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, 'Results');
+    XLSX.writeFile(wb, filename);
+}
 
-    if (outputFormat === 'xlsx') {
-        // CSV 파싱하지 않고 직접 inputContents와 outputMap 사용
-        const rows = inputContents.map((input, index) => {
-            const output = outputMap.get(`request-${index + 1}`) || '';
-            return [input.id, input.user, output];
-        });
-
-        const ws = XLSX.utils.aoa_to_sheet([['id', 'user', 'assistant'], ...rows]);
-        const wb = XLSX.utils.book_new();
-        XLSX.utils.book_append_sheet(wb, ws, 'Results');
-        XLSX.writeFile(wb, `${filename}.xlsx`);
-    } else {
-        const blob = new Blob(['\uFEFF' + content], { type: 'text/csv;charset=utf-8' });
-        const url = URL.createObjectURL(blob);
-        const a = document.createElement('a');
-        a.href = url;
-        a.download = `${filename}.csv`;
-        document.body.appendChild(a);
-        a.click();
-        document.body.removeChild(a);
-        URL.revokeObjectURL(url);
-    }
+function downloadCsv(content) {
+    const timestamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
+    const filename = `${originalFileName}_results_${timestamp}.csv`;
+    
+    const blob = new Blob(['\uFEFF' + content], { type: 'text/csv;charset=utf-8' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = filename;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
 }
 
 // 상태 확인 polling 관련
@@ -397,28 +398,27 @@ function readFileAsText(file) {
         const reader = new FileReader();
         reader.onload = () => {
             try {
-                const lines = reader.result.split('\n').map(line => line.trim());
-                if (lines.length < 2) throw new Error('파일이 비어있습니다.');
+                const text = reader.result;
+                const rows = parseCSV(text);  // 새로운 CSV 파서 사용
                 
-                // 헤더 확인
-                const headers = lines[0].split(',').map(h => h.trim().toLowerCase());
-                const idIndex = headers.indexOf('id');
-                const userIndex = headers.indexOf('user');
+                if (rows.length < 2) throw new Error('파일이 비어있습니다.');
+                
+                // 헤더 확인 (첫 번째 행)
+                const headers = rows[0];
+                const idIndex = headers.findIndex(h => h.trim().toLowerCase() === 'id');
+                const userIndex = headers.findIndex(h => h.trim().toLowerCase() === 'user');
                 
                 if (idIndex === -1 || userIndex === -1) {
                     throw new Error('파일은 반드시 "id"와 "user" 열을 포함해야 합니다.');
                 }
                 
-                // 데이터 파싱
-                const data = lines.slice(1)
-                    .filter(line => line)
-                    .map(line => {
-                        const values = line.split(',').map(v => v.trim());
-                        return {
-                            id: values[idIndex] || '',
-                            user: values[userIndex] || ''
-                        };
-                    });
+                // 데이터 파싱 (두 번째 행부터)
+                const data = rows.slice(1)
+                    .filter(row => row.length > 0)
+                    .map(row => ({
+                        id: row[idIndex]?.trim() || '',
+                        user: row[userIndex]?.trim() || ''
+                    }));
                 
                 resolve(data);
             } catch (error) {
@@ -465,6 +465,55 @@ function escapeCsvField(field) {
         .replace(/"/g, '""')  // 큰따옴표 이스케이프
         .replace(/\n/g, ' ')  // 줄바꿈 제거
         .replace(/\r/g, '');  // 캐리지 리턴 제거
+}
+
+// CSV 파싱 함수 추가
+function parseCSV(text) {
+    const rows = [];
+    let currentRow = [];
+    let currentField = '';
+    let withinQuotes = false;
+    
+    for (let i = 0; i < text.length; i++) {
+        const char = text[i];
+        const nextChar = text[i + 1];
+        
+        if (char === '"') {
+            if (withinQuotes && nextChar === '"') {
+                // 두 개의 연속된 따옴표는 하나의 따옴표로 처리
+                currentField += '"';
+                i++;
+            } else {
+                // 따옴표 상태 전환
+                withinQuotes = !withinQuotes;
+            }
+        } else if (char === ',' && !withinQuotes) {
+            // 필드 구분
+            currentRow.push(currentField);
+            currentField = '';
+        } else if ((char === '\n' || char === '\r') && !withinQuotes) {
+            // 행 구분
+            if (char === '\r' && nextChar === '\n') {
+                i++; // \r\n 건너뛰기
+            }
+            if (currentField || currentRow.length > 0) {
+                currentRow.push(currentField);
+                rows.push(currentRow);
+                currentRow = [];
+                currentField = '';
+            }
+        } else {
+            currentField += char;
+        }
+    }
+    
+    // 마지막 필드/행 처리
+    if (currentField || currentRow.length > 0) {
+        currentRow.push(currentField);
+        rows.push(currentRow);
+    }
+    
+    return rows;
 }
 
 document.addEventListener('DOMContentLoaded', () => {
